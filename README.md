@@ -80,7 +80,7 @@ The value of `modulename` must match **`go.mod` exactly** (including letter case
 ```toml
 [experimental.plugins.webhooks]
   modulename = "github.com/JoaoVictorLouro/traefik-plugin-webhooks"
-  version = "v0.2.0"
+  version = "v0.3.0"
 ```
 
 YAML equivalents follow the Traefik file provider documentation for your edition.
@@ -138,7 +138,7 @@ For **Traefik Yaegi** (local plugins and most hub middleware plugins), the Go **
 ## Publishing
 
 1. Update `go.mod` / imports if you change the module path.
-2. Tag a release: `git tag v0.2.0 && git push origin v0.2.0` (semver `v…` tags are required for the Go module proxy and for Traefik’s `version` field).
+2. Tag a release: `git tag v0.3.0 && git push origin v0.3.0` (semver `v…` tags are required for the Go module proxy and for Traefik’s `version` field).
 3. The **Release** workflow runs tests and creates a GitHub release with generated notes.
 4. Point Traefik’s static plugin stanza at the new semver tag, using the **exact** `go.mod` module path in `modulename` (see static configuration above).
 
