@@ -30,7 +30,7 @@ experimental:
   plugins:
     webhooks:
       moduleName: "github.com/JoaoVictorLouro/traefik-plugin-webhooks"
-      version: "v0.3.0"
+      version: "v0.4.0"
 ```
 
 If you use the file provider in TOML, the equivalent block is `[experimental.plugins.webhooks]` with `modulename` / `version` per the [Traefik documentation](https://doc.traefik.io/traefik/) for your version.
@@ -167,7 +167,7 @@ make lint      # requires golangci-lint on PATH
 ## Publishing
 
 1. Keep `go.mod` / imports aligned with the public module path.
-2. Tag releases with semver, for example `git tag v0.3.0 && git push origin v0.3.0` (required for the Go proxy and Traefik’s `version` field).
+2. Tag releases with semver, for example `git tag v0.4.0 && git push origin v0.4.0` (required for the Go proxy and Traefik’s `version` field).
 3. The **Release** workflow runs tests and creates a GitHub release.
 4. Point Traefik’s static plugin stanza at the new tag using the exact `moduleName` from `go.mod`.
 
