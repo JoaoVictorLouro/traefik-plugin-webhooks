@@ -1,0 +1,36 @@
+# Dynamic config for local Traefik plugin testing (docker compose).
+# Plugin name "webhooks" must match: --experimental.localPlugins.webhooks.moduleName=...
+#
+# Try:
+#   curl -s "http://localhost:8888/api?x=1" -H "X-Demo: yes"
+# Then:
+#   docker compose logs --tail=50 webhook
+#
+http:
+  routers:
+    api:
+      entryPoints:
+        - web
+      rule: PathPrefix(`/api`)
+      middlewares:
+        - webhooks
+      service: whoami
+
+  services:
+    whoami:
+      loadBalancer:
+        servers:
+          - url: http://whoami:80
+
+  middlewares:
+    webhooks:
+      plugin:
+        webhooks:
+          webhookMode: after_request
+          webhookIncludeBody: true
+          webhookIncludeHeaders: true
+          rules:
+            # Match typical browser/curl Hosts; widen to ".*" if needed.
+            - urlRegex: "^http://(localhost|127\\.0\\.0\\.1)(:\\d+)?/api.*"
+              method: GET
+              webhookUrl: http://webhook:8080/collect

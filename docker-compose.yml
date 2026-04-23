@@ -1,0 +1,51 @@
+# Local stack to exercise traefik-plugin-webhooks without publishing the module.
+#
+# Prerequisites: Docker Engine + Compose v2.
+#
+# 1) From the repository root:
+#      docker compose up --build
+#
+# 2) Send traffic through Traefik (middleware runs before whoami):
+#      curl -s "http://localhost:8888/api?x=1" -H "X-Demo: yes"
+#
+# 3) Inspect webhook POSTs (JSON body with url/headers/body):
+#      docker compose logs --tail=80 -f webhook
+#
+# 4) Traefik dashboard (insecure, dev only):
+#      http://localhost:8889/dashboard/
+#
+# Notes:
+# - The plugin source is bind-mounted where Traefik expects local Go modules.
+# - Change deploy/dynamic/dynamic.yml (e.g. webhookMode / rules) and save; file provider watch reloads it.
+#
+services:
+  traefik:
+    image: traefik:v3.3
+    depends_on:
+      whoami:
+        condition: service_started
+      webhook:
+        condition: service_started
+    command:
+      - --log.level=INFO
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --entrypoints.web.address=:80
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --experimental.localPlugins.webhooks.moduleName=github.com/joaovictorlouro/traefik-plugin-webhooks
+    ports:
+      - "8888:80"
+      - "8889:8080"
+    volumes:
+      # Mount this repo at the Go module path Traefik uses for localPlugins.
+      - ./:/plugins-local/src/github.com/joaovictorlouro/traefik-plugin-webhooks
+      - ./deploy/dynamic:/etc/traefik/dynamic:ro
+
+  whoami:
+    image: traefik/whoami:v1.10.2
+
+  webhook:
+    image: mendhak/http-https-echo:latest
+    environment:
+      - HTTP_PORT=8080
