@@ -77,7 +77,7 @@ func TestBeforeRequestWebhook(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 		_, _ = w.Write([]byte("upstream"))
 	})
@@ -143,7 +143,7 @@ func TestAfterRequestWebhookRespectsStatus(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Resp", "ok")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("created"))

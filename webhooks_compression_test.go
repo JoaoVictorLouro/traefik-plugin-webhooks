@@ -36,7 +36,7 @@ func TestAfterRequestWebhook_decodesGzipForPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("X-App", "demo")
 		w.WriteHeader(http.StatusOK)
@@ -105,7 +105,7 @@ func TestAfterRequestWebhook_brPayloadFallsBackToWireBytes(t *testing.T) {
 	// Fake "brotli" wire bytes; plugin does not ship a br decoder (Traefik Yaegi cannot load it).
 	wire := []byte{0xce, 0xb2, 0xcf, 0x80}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Encoding", "br")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(wire)

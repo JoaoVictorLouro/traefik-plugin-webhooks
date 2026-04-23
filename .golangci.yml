@@ -15,3 +15,9 @@ linters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    # Traefik Yaegi requires the Go package name to match the module path's last segment
+    # with hyphens replaced by underscores (e.g. traefik-plugin-webhooks → traefik_plugin_webhooks).
+    - linters:
+        - revive
+      text: "don't use an underscore in package name"
