@@ -218,7 +218,7 @@ func TestNoRulesPassesThrough(t *testing.T) {
 	t.Parallel()
 
 	var saw bool
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		saw = true
 		w.WriteHeader(http.StatusOK)
 	})
@@ -240,7 +240,7 @@ func TestNoRulesPassesThrough(t *testing.T) {
 func TestBodyTooLarge(t *testing.T) {
 	t.Parallel()
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatal("next should not run when body rejected")
 	})
 

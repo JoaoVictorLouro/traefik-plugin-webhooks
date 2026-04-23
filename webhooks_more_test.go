@@ -24,7 +24,7 @@ func TestAfterRequestWithoutBodyBuffering(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Resp", "stream")
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte("chunk"))
