@@ -33,13 +33,13 @@ services:
       - --entrypoints.web.address=:80
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
-      - --experimental.localPlugins.webhooks.moduleName=github.com/joaovictorlouro/traefik-plugin-webhooks
+      - --experimental.localPlugins.webhooks.moduleName=github.com/JoaoVictorLouro/traefik-plugin-webhooks
     ports:
       - "8888:80"
       - "8889:8080"
     volumes:
       # Mount this repo at the Go module path Traefik uses for localPlugins.
-      - ./:/plugins-local/src/github.com/joaovictorlouro/traefik-plugin-webhooks
+      - ./:/plugins-local/src/github.com/JoaoVictorLouro/traefik-plugin-webhooks
       - ./deploy/dynamic:/etc/traefik/dynamic:ro
 
   whoami:

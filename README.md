@@ -75,10 +75,12 @@ Decompressed output is capped at **10 MiB** per response to reduce zip-bomb risk
 
 Adjust the module path if you fork or republish this repository.
 
+The value of `modulename` must match **`go.mod` exactly** (including letter case). It is `github.com/JoaoVictorLouro/traefik-plugin-webhooks`, which is not the same string as the browser URL `github.com/JoaoVictorLouro/traefik-plugin-webhooks`. Using the wrong casing leads to catalog errors such as `Unknown plugin` / HTTP 404 when Traefik resolves the module.
+
 ```toml
 [experimental.plugins.webhooks]
-  modulename = "github.com/joaovictorlouro/traefik-plugin-webhooks"
-  version = "v0.1.0"
+  modulename = "github.com/JoaoVictorLouro/traefik-plugin-webhooks"
+  version = "v0.2.0"
 ```
 
 YAML equivalents follow the Traefik file provider documentation for your edition.
@@ -131,16 +133,35 @@ make test      # go test -race -cover ./...
 make lint      # requires golangci-lint on PATH
 ```
 
-For **Traefik Yaegi** (local plugins and most hub middleware plugins), the Go **package name** must match the last segment of the module path with hyphens replaced by underscores. For `github.com/joaovictorlouro/traefik-plugin-webhooks` this repository uses `package traefik_plugin_webhooks`. A mismatch produces errors such as `undefined: traefik_plugin_webhooks` when Traefik evaluates `New`.
+For **Traefik Yaegi** (local plugins and most hub middleware plugins), the Go **package name** must match the last segment of the module path with hyphens replaced by underscores. For `github.com/JoaoVictorLouro/traefik-plugin-webhooks` this repository uses `package traefik_plugin_webhooks`. A mismatch produces errors such as `undefined: traefik_plugin_webhooks` when Traefik evaluates `New`.
 
 ## Publishing
 
 1. Update `go.mod` / imports if you change the module path.
-2. Tag a release: `git tag v0.1.0 && git push origin v0.1.0`.
+2. Tag a release: `git tag v0.2.0 && git push origin v0.2.0` (semver `v…` tags are required for the Go module proxy and for Traefik’s `version` field).
 3. The **Release** workflow runs tests and creates a GitHub release with generated notes.
-4. Point Traefik’s static plugin stanza at the new semver tag.
+4. Point Traefik’s static plugin stanza at the new semver tag, using the **exact** `go.mod` module path in `modulename` (see static configuration above).
 
-For inclusion on the Traefik plugin hub, follow the official checklist for `.traefik.yml` metadata and compatibility strings.
+### Traefik Plugin Catalog ([plugins.traefik.io](https://plugins.traefik.io/create))
+
+Downloads for `experimental.plugins` go through the catalog, not directly from GitHub release assets. Until the repository is indexed, Traefik may report `Unknown plugin` for your module.
+
+Requirements (from Traefik’s publishing docs):
+
+- Public GitHub repository that is **not** a fork of another catalog plugin.
+- Repository topic **`traefik-plugin`** on GitHub.
+- **`.traefik.yml`** at the repository root with valid **`testData`**, and **`go.mod`** at the root.
+- **Git tags** for each version you reference in Traefik.
+- Non–standard-library dependencies must be **vendored** in the repository (this plugin uses the stdlib only).
+
+The catalog refreshes on the order of **once per day**. If validation fails, a bot may open an issue in this repository; fix the problem and close the issue so indexing can resume.
+
+You can confirm GitHub-side requirements without changing the repository, for example:
+
+```bash
+gh repo view --json isFork,repositoryTopics
+gh release list
+```
 
 ## License
 

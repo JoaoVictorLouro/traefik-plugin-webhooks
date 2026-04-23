@@ -3,7 +3,7 @@ summary: >-
   Sends HTTP POST webhooks with JSON payloads when requests match URL, method,
   and optional body rules. Supports before and after upstream execution.
 type: middleware
-import: github.com/joaovictorlouro/traefik-plugin-webhooks
+import: github.com/JoaoVictorLouro/traefik-plugin-webhooks
 compatibility: ">=2.10.0"
 testData:
   webhookMode: before_request
