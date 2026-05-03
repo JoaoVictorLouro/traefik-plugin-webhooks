@@ -30,6 +30,14 @@ const (
 	WebhookModeAfterRequest WebhookMode = "after_request"
 )
 
+// HeaderRegexRule matches the incoming request header named Header against Regex.
+// Header lookup uses canonical MIME header keys (case-insensitive in config).
+// Multiple header values are joined with ", " like a single header line.
+type HeaderRegexRule struct {
+	Regex  string `json:"regex,omitempty"`
+	Header string `json:"header,omitempty"`
+}
+
 // Rule describes one match expression and its webhook target.
 type Rule struct {
 	// URLRegex is matched against the synthesized request URL (scheme, host, path, and raw query).
@@ -41,6 +49,9 @@ type Rule struct {
 	// BodyRegex, when non-empty, must match the request body for the rule to trigger.
 	// Request bodies are buffered in memory when any rule defines BodyRegex.
 	BodyRegex string `json:"bodyRegex,omitempty"`
+	// HeaderRegexes, when non-empty, require every entry’s regex to match that request header’s value.
+	// Matching always uses the client request headers (before_request and after_request).
+	HeaderRegexes []HeaderRegexRule `json:"headerRegexes,omitempty"`
 	// WebhookURL receives an HTTP POST with a JSON payload when this rule matches.
 	WebhookURL string `json:"webhookUrl,omitempty"`
 }
@@ -67,11 +78,17 @@ func CreateConfig() *Config {
 	return &Config{}
 }
 
+type compiledHeaderRegex struct {
+	header string // canonical MIME header name
+	re     *regexp.Regexp
+}
+
 type compiledRule struct {
-	urlRegex   *regexp.Regexp
-	method     string
-	bodyRegex  *regexp.Regexp
-	webhookURL string
+	urlRegex      *regexp.Regexp
+	method        string
+	bodyRegex     *regexp.Regexp
+	headerRegexes []compiledHeaderRegex
+	webhookURL    string
 }
 
 type webhookMiddleware struct {
@@ -127,11 +144,32 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 			needsBody = true
 		}
 
+		headerRes := make([]compiledHeaderRegex, 0, len(r.HeaderRegexes))
+		for j, hr := range r.HeaderRegexes {
+			hdr := strings.TrimSpace(hr.Header)
+			reStr := strings.TrimSpace(hr.Regex)
+			if hdr == "" && reStr == "" {
+				continue
+			}
+			if hdr == "" || reStr == "" {
+				return nil, fmt.Errorf("rules[%d].headerRegexes[%d]: header and regex must both be set", i, j)
+			}
+			cre, err := regexp.Compile(reStr)
+			if err != nil {
+				return nil, fmt.Errorf("rules[%d].headerRegexes[%d].regex: %w", i, j, err)
+			}
+			headerRes = append(headerRes, compiledHeaderRegex{
+				header: textproto.CanonicalMIMEHeaderKey(hdr),
+				re:     cre,
+			})
+		}
+
 		rules = append(rules, compiledRule{
-			urlRegex:   urlRe,
-			method:     strings.ToUpper(strings.TrimSpace(r.Method)),
-			bodyRegex:  bodyRe,
-			webhookURL: r.WebhookURL,
+			urlRegex:      urlRe,
+			method:        strings.ToUpper(strings.TrimSpace(r.Method)),
+			bodyRegex:     bodyRe,
+			headerRegexes: headerRes,
+			webhookURL:    r.WebhookURL,
 		})
 	}
 
@@ -270,6 +308,14 @@ func ruleMatches(rule compiledRule, req *http.Request, urlStr string, body []byt
 
 	if rule.method != "" && !strings.EqualFold(req.Method, rule.method) {
 		return false
+	}
+
+	for _, hr := range rule.headerRegexes {
+		vals := req.Header.Values(hr.header)
+		joined := strings.Join(vals, ", ")
+		if !hr.re.MatchString(joined) {
+			return false
+		}
 	}
 
 	if rule.bodyRegex != nil && !rule.bodyRegex.Match(body) {

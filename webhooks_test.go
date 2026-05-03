@@ -29,6 +29,20 @@ func TestNewValidation(t *testing.T) {
 	}
 
 	_, err = New(context.Background(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), &Config{
+		Rules: []Rule{{WebhookURL: "http://example.com", HeaderRegexes: []HeaderRegexRule{{Header: "X", Regex: "("}}}},
+	}, "t")
+	if err == nil {
+		t.Fatal("expected error for bad header regex")
+	}
+
+	_, err = New(context.Background(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), &Config{
+		Rules: []Rule{{WebhookURL: "http://example.com", HeaderRegexes: []HeaderRegexRule{{Header: "X", Regex: ""}}}},
+	}, "t")
+	if err == nil {
+		t.Fatal("expected error when header set without regex")
+	}
+
+	_, err = New(context.Background(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), &Config{
 		Rules:       []Rule{{WebhookURL: "http://example.com"}},
 		WebhookMode: "nope",
 	}, "t")
@@ -125,6 +139,68 @@ func TestBeforeRequestWebhook(t *testing.T) {
 	}
 	if p.StatusCode != 0 {
 		t.Fatalf("before_request webhook should omit statusCode, got %d", p.StatusCode)
+	}
+}
+
+func TestHeaderRegexesMatch(t *testing.T) {
+	t.Parallel()
+
+	received := make(chan Payload, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p Payload
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		received <- p
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	h, err := New(context.Background(), next, &Config{
+		Rules: []Rule{
+			{
+				URLRegex: ".*/api",
+				HeaderRegexes: []HeaderRegexRule{
+					{Header: "Referer", Regex: `^https://partner\.example/`},
+				},
+				WebhookURL: srv.URL,
+			},
+		},
+		WebhookMode: string(WebhookModeBeforeRequest),
+	}, "hdr")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	noRef := httptest.NewRequest(http.MethodGet, "/api", nil)
+	noRef.Host = "app.example.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, noRef)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	select {
+	case p := <-received:
+		t.Fatalf("did not expect webhook without Referer, got %#v", p)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	withRef := httptest.NewRequest(http.MethodGet, "/api", nil)
+	withRef.Host = "app.example.com"
+	withRef.Header.Set("Referer", "https://partner.example/page")
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, withRef)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", rec2.Code)
+	}
+	p := waitForWebhook(t, received, 2*time.Second)
+	if p.URL != "http://app.example.com/api" {
+		t.Fatalf("url: got %q", p.URL)
 	}
 }
 

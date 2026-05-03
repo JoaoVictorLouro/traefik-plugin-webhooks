@@ -13,4 +13,7 @@ testData:
     - urlRegex: "^https://app\\.example\\.com/api/.*"
       method: POST
       bodyRegex: "checkout"
+      headerRegexes:
+        - regex: "^https://"
+          header: Referer
       webhookUrl: https://hooks.example.com/notify
