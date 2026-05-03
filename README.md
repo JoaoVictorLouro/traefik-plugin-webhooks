@@ -1,6 +1,6 @@
 # Traefik Webhooks (middleware plugin)
 
-Traefik middleware that matches incoming traffic against rules (URL, method, optional request body) and sends **asynchronous** `HTTP POST` webhooks with a small JSON payload. Use it for audit trails, automation, or integrations without blocking the client on your webhook sink.
+Traefik middleware that matches incoming traffic against rules (URL, method, optional request body, optional request-header regexes) and sends **asynchronous** `HTTP POST` webhooks with a small JSON payload. Use it for audit trails, automation, or integrations without blocking the client on your webhook sink.
 
 Use this to trigger webhooks on any application or service that does not support Webhook! 🎉
 
@@ -8,7 +8,7 @@ Use this to trigger webhooks on any application or service that does not support
 
 Here is a list of features: (current [x], planned [ ], and potential `?`)
 
-* [x] Rule-based matching: URL regex, optional HTTP method, optional request-body regex
+* [x] Rule-based matching: URL regex, optional HTTP method, optional request-body regex, optional request-header regexes (`headerRegexes`)
 * [x] Multiple rules: each rule is evaluated independently; several can match one request
 * [x] `before_request` mode: webhook sees the client request (URL, optional headers/body)
 * [x] `after_request` mode: webhook can include upstream response headers, body, and status
@@ -64,6 +64,9 @@ http:
             - urlRegex: "^https://app\\.example\\.com/api/orders/.*"
               method: POST
               bodyRegex: "checkout"
+              headerRegexes:
+                - header: Referer
+                  regex: "^https://trusted\\.example/"
               webhookUrl: "https://hooks.example.com/order-events"
             - urlRegex: "^https://app\\.example\\.com/admin/.*"
               method: DELETE
@@ -84,6 +87,9 @@ http:
 | `rules[].urlRegex` | string | no | Go [`regexp`](https://pkg.go.dev/regexp) against the synthesized request URL (see [Process](#process)). Omit or use `""` to match any URL. |
 | `rules[].method` | string | no | HTTP method filter, case-insensitive; empty = any method. |
 | `rules[].bodyRegex` | string | no | If set, the request body must match this regex; triggers buffering (see [Limits](#limits-and-caveats)). |
+| `rules[].headerRegexes` | list | no | If non-empty, every entry must match (see [Matching](#matching)). Each item needs `header` and `regex`. |
+| `rules[].headerRegexes[].header` | string | yes (when entry is used) | Request header name; matched case-insensitively and canonicalized like HTTP. |
+| `rules[].headerRegexes[].regex` | string | yes (when entry is used) | Go [`regexp`](https://pkg.go.dev/regexp) against that header’s value. If the header appears multiple times, values are joined with `", "`. |
 | `rules[].webhookUrl` | string | yes | URL that receives `POST` with JSON when the rule matches. |
 | `webhookIncludeBody` | bool | no | When `true`, JSON includes a `body` string (see payload table below). |
 | `webhookIncludeHeaders` | bool | no | When `true`, JSON includes a `headers` object. |
@@ -102,6 +108,7 @@ A rule matches when **all** of the following hold:
 
 - **`urlRegex`**: matched against a full URL built as `scheme + "://" + host + RequestURI()`. Scheme prefers `X-Forwarded-Proto` (first value) when present, then TLS. An empty pattern compiles to `""`, which in Go matches any string.
 - **`method`**: case-insensitive equality with the request method, or any method if empty.
+- **`headerRegexes`**: if the list is non-empty, **each** entry’s `regex` must match the **incoming request** header named `header`. Missing headers are treated as an empty string. An entry with both `header` and `regex` blank is ignored; if only one is set, configuration is invalid. This applies in both `before_request` and `after_request` (matching always uses the client request, not the upstream response).
 - **`bodyRegex`**: if non-empty, the **request** body must match. If **any** rule sets `bodyRegex`, the plugin buffers the request body (see [Limits](#limits-and-caveats)) and restores `req.Body` so the upstream still sees the original payload.
 
 For `webhookMode: after_request`, `requireHttpStatus` is applied after the upstream runs: if the list is non-empty, the response status must be listed; if empty, any status is allowed (subject to rule matching).
