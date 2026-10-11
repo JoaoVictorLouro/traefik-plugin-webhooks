@@ -9,6 +9,8 @@ testData:
   webhookMode: before_request
   webhookIncludeBody: true
   webhookIncludeHeaders: true
+  webhookIncludeRequestBody: true
+  webhookIncludeRequestHeaders: true
   rules:
     - urlRegex: "^https://app\\.example\\.com/api/.*"
       method: POST

@@ -377,3 +377,177 @@ func TestRequestBodyRestoredForUpstream(t *testing.T) {
 		t.Fatalf("upstream saw wrong body: %q", rec.Body.String())
 	}
 }
+
+func TestAfterRequestIncludesClientRequest(t *testing.T) {
+	t.Parallel()
+
+	received := make(chan Payload, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p Payload
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		received <- p
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	var upstreamBody string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		upstreamBody = string(body)
+		w.Header().Set("X-Response", "response-header")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("response-body"))
+	})
+
+	h, err := New(context.Background(), next, &Config{
+		Rules: []Rule{{
+			URLRegex:   ".*",
+			WebhookURL: srv.URL,
+		}},
+		WebhookIncludeBody:           true,
+		WebhookIncludeHeaders:        true,
+		WebhookIncludeRequestBody:    true,
+		WebhookIncludeRequestHeaders: true,
+		WebhookMode:                  string(WebhookModeAfterRequest),
+	}, "after-request-data")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/orders", bytes.NewBufferString("request-body"))
+	req.Header.Set("X-Request", "request-header")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if upstreamBody != "request-body" {
+		t.Fatalf("upstream saw wrong request body: %q", upstreamBody)
+	}
+
+	p := waitForWebhook(t, received, 2*time.Second)
+	if p.Body != "response-body" {
+		t.Fatalf("response body: got %q", p.Body)
+	}
+	if p.Headers["X-Response"] != "response-header" {
+		t.Fatalf("response headers: got %#v", p.Headers)
+	}
+	if p.RequestBody == nil || *p.RequestBody != "request-body" {
+		t.Fatalf("request body: got %#v", p.RequestBody)
+	}
+	if p.RequestHeaders == nil || (*p.RequestHeaders)["X-Request"] != "request-header" {
+		t.Fatalf("request headers: got %#v", p.RequestHeaders)
+	}
+}
+
+func TestRequestFieldsOmittedWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	received := make(chan map[string]json.RawMessage, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		received <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	h, err := New(context.Background(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), &Config{
+		Rules: []Rule{{
+			URLRegex:   ".*",
+			WebhookURL: srv.URL,
+		}},
+	}, "omitted-request-data")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+	select {
+	case payload := <-received:
+		if _, ok := payload["requestBody"]; ok {
+			t.Fatal("requestBody should be omitted")
+		}
+		if _, ok := payload["requestHeaders"]; ok {
+			t.Fatal("requestHeaders should be omitted")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for webhook")
+	}
+}
+
+func TestIncludeRequestBodyCapturesAndLimitsBody(t *testing.T) {
+	t.Parallel()
+
+	received := make(chan Payload, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p Payload
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		received <- p
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(body)
+	})
+	config := &Config{
+		Rules: []Rule{{
+			URLRegex:   ".*",
+			WebhookURL: srv.URL,
+		}},
+		WebhookIncludeRequestBody: true,
+	}
+	h, err := New(context.Background(), next, config, "request-body")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("captured")))
+	if rec.Body.String() != "captured" {
+		t.Fatalf("upstream saw wrong request body: %q", rec.Body.String())
+	}
+	p := waitForWebhook(t, received, 2*time.Second)
+	if p.RequestBody == nil || *p.RequestBody != "captured" {
+		t.Fatalf("request body: got %#v", p.RequestBody)
+	}
+
+	upstreamCalled := false
+	rejectingHandler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		upstreamCalled = true
+	})
+	rejecting, err := New(context.Background(), rejectingHandler, config, "large-request-body")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	large := bytes.Repeat([]byte("a"), (1<<20)+1)
+	largeRec := httptest.NewRecorder()
+	rejecting.ServeHTTP(largeRec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(large)))
+	if largeRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized request body, got %d", largeRec.Code)
+	}
+	if upstreamCalled {
+		t.Fatal("upstream should not run for an oversized request body")
+	}
+}

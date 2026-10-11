@@ -64,6 +64,10 @@ type Config struct {
 	WebhookIncludeBody bool `json:"webhookIncludeBody,omitempty"`
 	// WebhookIncludeHeaders controls whether the JSON payload includes response or request headers.
 	WebhookIncludeHeaders bool `json:"webhookIncludeHeaders,omitempty"`
+	// WebhookIncludeRequestBody copies the client request body into requestBody.
+	WebhookIncludeRequestBody bool `json:"webhookIncludeRequestBody,omitempty"`
+	// WebhookIncludeRequestHeaders copies the client request headers into requestHeaders.
+	WebhookIncludeRequestHeaders bool `json:"webhookIncludeRequestHeaders,omitempty"`
 
 	// WebhookMode must be before_request or after_request (default: before_request).
 	WebhookMode string `json:"webhookMode,omitempty"`
@@ -97,8 +101,10 @@ type webhookMiddleware struct {
 	rules   []compiledRule
 	mode    WebhookMode
 	include struct {
-		body    bool
-		headers bool
+		body           bool
+		headers        bool
+		requestBody    bool
+		requestHeaders bool
 	}
 	statusAllow map[int]struct{}
 
@@ -123,7 +129,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 	}
 
 	rules := make([]compiledRule, 0, len(config.Rules))
-	needsBody := false
+	needsBody := config.WebhookIncludeRequestBody
 
 	for i, r := range config.Rules {
 		if strings.TrimSpace(r.WebhookURL) == "" {
@@ -184,11 +190,15 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		rules: rules,
 		mode:  mode,
 		include: struct {
-			body    bool
-			headers bool
+			body           bool
+			headers        bool
+			requestBody    bool
+			requestHeaders bool
 		}{
-			body:    config.WebhookIncludeBody,
-			headers: config.WebhookIncludeHeaders,
+			body:           config.WebhookIncludeBody,
+			headers:        config.WebhookIncludeHeaders,
+			requestBody:    config.WebhookIncludeRequestBody,
+			requestHeaders: config.WebhookIncludeRequestHeaders,
 		},
 		statusAllow:      statusAllow,
 		needsRequestBody: needsBody,
@@ -203,6 +213,10 @@ type Payload struct {
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers"`
 	Body    string            `json:"body"`
+	// RequestHeaders is the client request headers when webhookIncludeRequestHeaders is true.
+	RequestHeaders *map[string]string `json:"requestHeaders,omitempty"`
+	// RequestBody is the client request body when webhookIncludeRequestBody is true.
+	RequestBody *string `json:"requestBody,omitempty"`
 	// StatusCode is the upstream HTTP status when webhookMode is after_request; omitted for before_request.
 	StatusCode int `json:"statusCode,omitempty"`
 }
@@ -296,7 +310,7 @@ func (m *webhookMiddleware) finishAfterWebhook(req *http.Request, body []byte, s
 		if !ruleMatches(rule, req, urlStr, body) {
 			continue
 		}
-		payload := m.buildAfterPayloadFromResponse(urlStr, status, respHeader, respBody)
+		payload := m.buildAfterPayloadFromResponse(req, urlStr, body, status, respHeader, respBody)
 		m.dispatch(rule.webhookURL, payload)
 	}
 }
@@ -337,10 +351,11 @@ func (m *webhookMiddleware) buildRequestPayload(req *http.Request, urlStr string
 	if m.include.body {
 		p.Body = string(body)
 	}
+	m.attachRequest(&p, req, body)
 	return p
 }
 
-func (m *webhookMiddleware) buildAfterPayloadFromResponse(urlStr string, statusCode int, respHeader http.Header, respBody []byte) Payload {
+func (m *webhookMiddleware) buildAfterPayloadFromResponse(req *http.Request, urlStr string, reqBody []byte, statusCode int, respHeader http.Header, respBody []byte) Payload {
 	p := Payload{
 		URL:        urlStr,
 		StatusCode: statusCode,
@@ -364,7 +379,19 @@ func (m *webhookMiddleware) buildAfterPayloadFromResponse(urlStr string, statusC
 	if m.include.body {
 		p.Body = string(bodyBytes)
 	}
+	m.attachRequest(&p, req, reqBody)
 	return p
+}
+
+func (m *webhookMiddleware) attachRequest(p *Payload, req *http.Request, body []byte) {
+	if m.include.requestHeaders {
+		headers := flattenHeaders(req.Header)
+		p.RequestHeaders = &headers
+	}
+	if m.include.requestBody {
+		s := string(body)
+		p.RequestBody = &s
+	}
 }
 
 func (m *webhookMiddleware) dispatch(url string, payload Payload) {

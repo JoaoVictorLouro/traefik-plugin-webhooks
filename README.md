@@ -12,6 +12,7 @@ Here is a list of features: (current [x], planned [ ], and potential `?`)
 * [x] Multiple rules: each rule is evaluated independently; several can match one request
 * [x] `before_request` mode: webhook sees the client request (URL, optional headers/body)
 * [x] `after_request` mode: webhook can include upstream response headers, body, and status
+* [x] Optional client request body and headers alongside the mode-specific body and headers
 * [x] Optional `requireHttpStatus` filter for `after_request` (only fire on selected status codes)
 * [x] Best-effort delivery in a background goroutine (does not add retries or block the client for webhook I/O)
 * [x] For `after_request`, optional decompression of response bodies in the webhook JSON when upstream sends `gzip` or `deflate`
@@ -28,7 +29,7 @@ experimental:
   plugins:
     webhooks:
       moduleName: "github.com/JoaoVictorLouro/traefik-plugin-webhooks"
-      version: "v0.5.0"
+      version: "v0.6.0"
 ```
 
 If you use the file provider in TOML, the equivalent block is `[experimental.plugins.webhooks]` with `modulename` / `version` per the [Traefik documentation](https://doc.traefik.io/traefik/) for your version.
@@ -58,6 +59,8 @@ http:
           webhookMode: after_request
           webhookIncludeBody: true
           webhookIncludeHeaders: false
+          webhookIncludeRequestBody: true
+          webhookIncludeRequestHeaders: true
           # Only used when webhookMode is after_request; empty = any status
           requireHttpStatus: [200, 201, 204]
           rules:
@@ -93,6 +96,8 @@ http:
 | `rules[].webhookUrl` | string | yes | URL that receives `POST` with JSON when the rule matches. |
 | `webhookIncludeBody` | bool | no | When `true`, JSON includes a `body` string (see payload table below). |
 | `webhookIncludeHeaders` | bool | no | When `true`, JSON includes a `headers` object. |
+| `webhookIncludeRequestBody` | bool | no | When `true`, JSON includes the client request body in `requestBody`. |
+| `webhookIncludeRequestHeaders` | bool | no | When `true`, JSON includes the client request headers in `requestHeaders`. |
 | `webhookMode` | string | no | `before_request` (default) or `after_request`. |
 | `requireHttpStatus` | []int | no | Only for `after_request`: when non-empty, webhooks run only for these response codes. |
 
@@ -125,22 +130,26 @@ Every webhook is an `HTTP POST` with `Content-Type: application/json` and this s
     "X-Request-Id": "abc"
   },
   "body": "raw-body-or-empty-string",
+  "requestHeaders": {
+    "Authorization": "Bearer example"
+  },
+  "requestBody": "client-request-body",
   "statusCode": 201
 }
 ```
 
 `statusCode` is the **upstream** HTTP status and appears only for `after_request`. For `before_request` it is omitted (and omitted from JSON when zero).
 
-Top-level flags control what is copied into `headers` and `body`:
+Top-level flags control what is copied into `headers`, `body`, `requestHeaders`, and `requestBody`:
 
-| `webhookMode` | `url` | `headers` when `webhookIncludeHeaders: true` | `body` when `webhookIncludeBody: true` | `statusCode` |
-| --- | --- | --- | --- | --- |
-| `before_request` | Client request URL (same as used for matching) | Incoming **request** headers | Incoming **request** body (UTF-8 string) | omitted |
-| `after_request` | Same client URL | **Response** headers from upstream | **Response** body (see compression below) | upstream status |
+| `webhookMode` | `url` | `headers` when `webhookIncludeHeaders: true` | `body` when `webhookIncludeBody: true` | `requestHeaders` / `requestBody` | `statusCode` |
+| --- | --- | --- | --- | --- | --- |
+| `before_request` | Client request URL (same as used for matching) | Incoming **request** headers | Incoming **request** body (UTF-8 string) | Incoming request data when the corresponding request include flag is `true` | omitted |
+| `after_request` | Same client URL | **Response** headers from upstream | **Response** body (see compression below) | Incoming request data when the corresponding request include flag is `true` | upstream status |
 
-When an include flag is `false`, the field is still present: `headers` is `{}`, `body` is `""`.
+When `webhookIncludeBody` or `webhookIncludeHeaders` is `false`, its field is still present: `headers` is `{}`, `body` is `""`. When a request include flag is `false`, its `requestBody` or `requestHeaders` field is omitted.
 
-Delivery is **best-effort**: failures are not returned to the client and are not retried automatically. Each outbound webhook uses an HTTP client with a **10 second** timeout. Misconfigured `webhookUrl` values can imply **SSRF** toward internal networks; treat `webhookIncludeHeaders` carefully (`Authorization`, cookies, etc.).
+Delivery is **best-effort**: failures are not returned to the client and are not retried automatically. Each outbound webhook uses an HTTP client with a **10 second** timeout. Misconfigured `webhookUrl` values can imply **SSRF** toward internal networks; treat `webhookIncludeHeaders` and `webhookIncludeRequestHeaders` carefully (`Authorization`, cookies, etc.).
 
 #### Supported responses (`after_request` and compression)
 
@@ -157,7 +166,7 @@ Decompressed webhook body size is capped at **10 MiB** per response to limit zip
 
 ### Limits and caveats
 
-- **Request body for `bodyRegex`**: at most **1 MiB** is read. Larger bodies yield **400 Bad Request** to the client and the upstream is not called.
+- **Request body for `bodyRegex` or `webhookIncludeRequestBody`**: at most **1 MiB** is read. Larger bodies yield **400 Bad Request** to the client and the upstream is not called.
 - **`after_request` with `webhookIncludeBody: true`**: the full response is buffered before streaming to the client (similar to rewrite-body style middleware). With `webhookIncludeBody: false`, the response streams through and the webhook still receives status (and headers if enabled) without buffering the body.
 - **Yaegi package name**: for local plugins, the Go **package** must be `traefik_plugin_webhooks` (last segment of the module path with hyphens → underscores). A mismatch surfaces as errors like `undefined: traefik_plugin_webhooks` when Traefik loads `New`.
 
@@ -172,7 +181,7 @@ make lint      # requires golangci-lint on PATH
 ## Publishing
 
 1. Keep `go.mod` / imports aligned with the public module path.
-2. Tag releases with semver, for example `git tag v0.5.0 && git push origin v0.5.0` (required for the Go proxy and Traefik’s `version` field).
+2. Tag releases with semver, for example `git tag v0.6.0 && git push origin v0.6.0` (required for the Go proxy and Traefik’s `version` field).
 3. The **Release** workflow runs tests and creates a GitHub release.
 4. Point Traefik’s static plugin stanza at the new tag using the exact `moduleName` from `go.mod`.
 
